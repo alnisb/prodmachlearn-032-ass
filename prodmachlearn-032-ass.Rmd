@@ -1,0 +1,115 @@
+---
+title: "Qualitative Activity Recognition of Weight Lifting Exercises"
+output: html_document
+---
+
+Firstly, the author wishes to acknowledge Groupware@LES for generously allowing the research data described at <http://groupware.les.inf.puc-rio.br/har> to be shared.
+
+This research takes a welcome angle on the collection and interpretation of personal activity data.  The outcomes are phrased in terms, not just what was done, but how well it was done.  In particular, the **Classe** response variable summarises the effectiveness of dumbell lifting exercises in one of 5 discrete classes.  Class A means _exercise done properly_ whereas classes B,C,D and E correspond to common errors.
+
+Activities to be undertaken in this exercise.
+
+1. Split the supplied data set into training and test as per 70/30 split often used and build a supervised learning model (ie we have the outcomes to learn from).
+2. For validation, do unsupervised prediction (ie we do not know the outcome) using our model on a set of 20 observations.
+
+## Load and Wrangle Data
+
+The starting point is to.
+
+* Load the libraries needed for analysis.
+* Set seed of internal pseduo random number generator arbitrarily, for repoducibility when using Random Forests.
+* Download the training and validation files, then load into R objects.  
+* Check the dimensions of what has been loaded.
+
+Note that there are quite a few patterns that should be treated as NA, inlcuding evidence someone has done some untrapped divisions in Excel!
+
+```{r}
+library(ggplot2)
+library(caret)
+library(randomForest)
+
+set.seed(750000)
+
+#download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile = "./pml-training.csv")
+#download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile = "./pml-testing.csv")
+
+trainingBaseline = read.csv("pml-training.csv", na.strings=c("", "NA", "NULL", "#DIV/0!"))
+validateBaseline = read.csv("pml-testing.csv", na.strings=c("", "NA", "NULL", "#DIV/0!"))
+
+dim(trainingBaseline)
+dim(validateBaseline)
+```
+
+It is expected all 160 columns are not relevant for analysis so the next step is to target the columns of relevance for the modelling we are to do.
+
+The first seven columns can be considered metadata and can be removed ahead of analysis, as well as columns with only NAs.
+
+```{r}
+NoMetaNA <- colnames(trainingBaseline[colSums(is.na(trainingBaseline)) == 0])[-(1:7)]
+trainingNoMetaNA <- trainingBaseline[NoMetaNA]
+dim(trainingNoMetaNA)
+```
+
+Uncover variables with extremely low variance, then remove highly correlated variables.
+
+```{r}
+varNearZero = nearZeroVar(trainingNoMetaNA[sapply(trainingNoMetaNA, is.numeric)], saveMetrics = TRUE)
+trainingVarNearZero = trainingNoMetaNA[,varNearZero[, 'nzv'] == 0]
+
+correlationSet <- cor(na.omit(trainingVarNearZero[sapply(trainingVarNearZero, is.numeric)]))
+correlationsToRemove = findCorrelation(correlationSet, cutoff = .90, verbose = TRUE)
+
+trainingNoCorr = trainingVarNearZero[,-correlationsToRemove]
+dim(trainingNoCorr)
+```
+
+This has reduced the core data set to 46 variables.
+
+Finally take the core data set, currently called trainingNoCorr, and split into training and testing as per 70/30 split.
+
+```{r}
+inTrain <- createDataPartition(y=trainingNoCorr$classe, p=0.7, list=FALSE)
+training <- trainingNoCorr[inTrain,]
+testing <- trainingNoCorr[-inTrain,]
+dim(training)
+dim(testing)
+```
+
+Finally, with a training set of 13737 observations and a testing set of 5885 observations, analysis can begin.
+
+## Analysis
+
+### Random Forest
+
+Sundry experimentation (not included in this report) has revealed that Random Forests provides good accuracy.
+
+Fit a Random Forest and determine the quality of fit.
+
+```{r}
+TrainRandomForest = randomForest(classe~., data=training, ntree=100, importance=T)
+TrainRandomForest
+```
+
+### Out of Sample Error
+
+An OOB error of 0.66 % on the training set is noted, now predict on the testing set.
+
+```{r}
+PredictionTest = predict(TrainRandomForest, testing, type="class")
+PredictionMatrix = with(testing, table(PredictionTest, classe))
+sum(diag(PredictionMatrix))/ sum(as.vector(PredictionMatrix))
+```
+
+99.5% accuracy is high and removes fears about the dreaded overfitting problem.
+
+## Conclusions
+
+Finally, do a prediction on the test case of 20 observations with unknown Classe.
+
+```{r}
+answers <- predict(TrainRandomForest, validateBaseline)
+answers
+```
+
+Note that these responses have been tested successfully on the Coursera submission engine for the Practical Machine Learning module.
+
